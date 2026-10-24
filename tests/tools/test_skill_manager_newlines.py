@@ -83,6 +83,28 @@ def test_rejected_skill_write_restores_original_lf_bytes(tmp_path):
         assert {p: p.read_bytes() for p in before} == before
 
 
+def test_rejected_skill_write_restores_crlf_and_bom_bytes(tmp_path):
+    with _isolated_manager(tmp_path) as (manager, registry, root):
+        root.mkdir(parents=True)
+        skill_md = root / "SKILL.md"
+        skill_md.write_bytes(b"\xef\xbb\xbf" + CONTENT.replace("\n", "\r\n").encode("utf-8"))
+        supporting = root / "references" / "newlines.md"
+        supporting.parent.mkdir()
+        supporting.write_bytes(b"\xef\xbb\xbfOriginal\r\nSupporting\r\n")
+        before = {p: p.read_bytes() for p in (skill_md, supporting)}
+        with patch.object(manager, "_security_scan_skill", return_value="Rejected by test scan"):
+            for operation in (
+                {"action": "patch", "old_string": "Keep", "new_string": "Replace"},
+                {"action": "write_file", "file_path": "references/newlines.md",
+                 "file_content": "Replacement\nLines\n"},
+            ):
+                result = json.loads(registry.dispatch(
+                    "skill_manage", {"name": "newline-contract", **operation}))
+                assert not result["success"], result
+                assert "Rejected by test scan" in result["error"]
+                assert {p: p.read_bytes() for p in before} == before
+
+
 if __name__ == "__main__":
     import sys
     import unittest

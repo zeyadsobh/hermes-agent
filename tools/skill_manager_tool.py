@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import hermes_yaml as yaml
 
 from hermes_constants import get_hermes_home
-from utils import atomic_write_text, is_truthy_value
+from utils import atomic_write_bytes, atomic_write_text, is_truthy_value
 from hermes_cli.config import cfg_get
 from agent.skill_utils import (
     extract_skill_description,
@@ -413,8 +413,9 @@ def _guarded_write(name: str, skill_dir: Path, target: Path, action: str, label:
     if target.exists():
         if read_guard := _background_review_read_before_write_guard(name, target, action, label):
             return read_guard
-        original = target.read_text(encoding="utf-8-sig")
-    if target == skill_dir / "SKILL.md" and (err := _description_budget_error(content, before=original)):
+        original = target.read_bytes()
+    original_decoded = original.decode("utf-8-sig") if original is not None else None
+    if target == skill_dir / "SKILL.md" and (err := _description_budget_error(content, before=original_decoded)):
         return _err(err)
     from hermes_constants import mkdir_under_hermes_home
     mkdir_under_hermes_home(target.parent)
@@ -424,7 +425,7 @@ def _guarded_write(name: str, skill_dir: Path, target: Path, action: str, label:
     if not scan_error:
         return None
     if original is not None:
-        atomic_write_text(target, original, preserve_mode=True, newline="")
+        atomic_write_bytes(target, original)
     else:
         target.unlink(missing_ok=True)
     return _err(scan_error)
