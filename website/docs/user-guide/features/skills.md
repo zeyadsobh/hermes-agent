@@ -741,6 +741,12 @@ hermes skills snapshot export setup.json          # Export skill config
 hermes skills tap add myorg/skills-repo           # Add a custom GitHub source
 ```
 
+`hermes skills list` marks bundled skills whose installed copy differs from the
+current stock version with an asterisk after `builtin` in the Source column, using the same file
+comparison as `hermes skills diff <name>`. This is independent of
+enabled/disabled status and of `list-modified`, which checks the last-synced
+manifest baseline rather than current stock.
+
 ### Supported hub sources
 
 | Source | Example | Notes |

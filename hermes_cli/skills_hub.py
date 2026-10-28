@@ -959,6 +959,7 @@ def do_list(source_filter: str = "all", enabled_only: bool = False,
     profile's config — ``-p`` swaps HERMES_HOME at process start, so no profile flag here."""
     from tools.skills_hub import HubLockFile, ensure_hub_dirs
     from tools.skills_sync import _read_manifest
+    from tools.skills_sync_bundled_ops import diff_bundled_skill
     from tools.skills_tool import _skill_catalog
     from agent.skill_utils import TIER_CREATE_DIR, TIER_EXTERNAL, TIER_PROJECT, get_disabled_skill_names
     from agent.skill_commands import skill_command_collision_note
@@ -975,7 +976,7 @@ def do_list(source_filter: str = "all", enabled_only: bool = False,
                    title="Installed Skills" + (" (enabled only)" if enabled_only else ""))
 
     counts = {"hub": 0, "builtin": 0, "local": 0}
-    enabled_count = disabled_count = 0
+    enabled_count = disabled_count = modified_count = 0
     for skill in sorted(all_skills, key=lambda s: (s.get("category") or "", s["name"])):
         name = skill["name"]
         hub_entry = hub_installed.get(name)
@@ -995,14 +996,20 @@ def do_list(source_filter: str = "all", enabled_only: bool = False,
         # Name taken by a built-in: the skill loads but has no /<name> (see agent.skill_commands).
         if note := skill_command_collision_note(name):
             status += f"\n[yellow]{note}[/]"
-        table.add_row(name, skill.get("category", ""), source_display,
+        source_cell = source_display
+        if source_type == "builtin" and (cmp := diff_bundled_skill(name))["ok"] and cmp["modified"]:
+            source_cell, modified_count = f"{source_display}[yellow]*[/]", modified_count + 1
+        table.add_row(name, skill.get("category", ""), source_cell,
                       _trust_cell(trust, source_display), status)
 
     c.print(table)
     tail = (f"{enabled_count} enabled shown" if enabled_only
             else f"{enabled_count} enabled, {disabled_count} disabled")
     c.print(f"[dim]{counts['hub']} hub-installed, {counts['builtin']} builtin, "
-            f"{counts['local']} local — {tail}[/]\n")
+            f"{counts['local']} local — {tail}[/]")
+    if modified_count:
+        c.print("[dim]* modified from stock — see `hermes skills diff <name>`[/]")
+    c.print()
 
 
 def do_check(name: Optional[str] = None, console: Optional[Console] = None) -> None:
