@@ -17,6 +17,7 @@ zygotes and renderers on SIGTERM, and killing a zygote first turns a clean exit 
 from __future__ import annotations
 
 import contextlib
+import functools
 import hashlib
 import json
 import logging
@@ -46,10 +47,17 @@ CHROMIUM_SANDBOX_BYPASS_ARGS: tuple[str, ...] = ("--no-sandbox", "--disable-dev-
 #   --disable-component-update                    no component downloads into a throwaway profile
 #   --disable-default-apps / --disable-sync       nothing installed or signed in behind the agent's back
 #   --disable-features=Translate                  no translate bubble covering the page
+#   --disable-blink-features=AutomationControlled navigator.webdriver stays false, as in a user's own browser
+#   --disable-backgrounding-occluded-windows / --disable-renderer-backgrounding / the occlusion feature
+#                                                 a covered window or locked screen must not throttle the page
 _BASE_FLAGS: tuple[str, ...] = (
     "--no-first-run", "--no-default-browser-check", "--disable-background-networking",
-    "--disable-component-update", "--disable-default-apps", "--disable-sync", "--disable-features=Translate",
+    "--disable-component-update", "--disable-default-apps", "--disable-sync", "--disable-features=Translate,CalculateNativeWinOcclusion",
+    "--disable-blink-features=AutomationControlled",
+    "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding",
 )
+# Headless Chromium defaults to an 800x600 window, which no real desktop browser reports.
+_HEADLESS_WINDOW_SIZE = "--window-size=1366,768"
 # Only for the launcher-resolved packaged Chromium: a keyring unlock prompt (Linux desktops) or the macOS
 # keychain dialog would block an unattended launch. Never for a real or shared profile, whose cookies are
 # encrypted with the OS store (``--password-store=basic`` would sign the copy out).
@@ -227,6 +235,40 @@ def _configured_chromium_args() -> list[str]:
     return chromium_args()
 
 
+@functools.lru_cache(maxsize=8)
+def _chromium_major_version(executable: str) -> Optional[int]:
+    """Major version of the Chromium at ``executable`` (None when it cannot be read)."""
+    if os.name == "nt":  # chrome.exe --version prints nothing there; read the file's version resource
+        cmd = ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+               "(Get-Item -LiteralPath '" + executable.replace("'", "''") + "').VersionInfo.ProductVersion"]
+        flags = _spawn_kwargs().get("creationflags", 0)
+    else:
+        cmd, flags = [executable, "--version"], 0
+    try:
+        out = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=10,
+                             creationflags=flags).stdout
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    match = re.search(r"(\d+)\.\d+\.\d+\.\d+", out)
+    return int(match.group(1)) if match else None
+
+
+def headless_user_agent(executable: str) -> Optional[str]:
+    """The user agent a headed Chromium of the same version reports on this OS. Headless Chromium
+    announces itself as ``HeadlessChrome``; None when the version is unknown (the default stays)."""
+    major = _chromium_major_version(executable)
+    if major is None:
+        return None
+    if sys.platform == "win32":
+        platform_token = "Windows NT 10.0; Win64; x64"
+    elif sys.platform == "darwin":
+        platform_token = "Macintosh; Intel Mac OS X 10_15_7"
+    else:
+        platform_token = "X11; Linux x86_64"
+    return (f"Mozilla/5.0 ({platform_token}) AppleWebKit/537.36 (KHTML, like Gecko) "
+            f"Chrome/{major}.0.0.0 Safari/537.36")
+
+
 def build_chromium_argv(executable: str, user_data_dir: str, *, packaged: bool, headed: bool,
                         sandbox_bypass: bool, extra_args=()) -> list[str]:
     """The launch argv (pure in its inputs + host sandbox facts + ``browser.chromium_args``).
@@ -240,8 +282,12 @@ def build_chromium_argv(executable: str, user_data_dir: str, *, packaged: bool, 
         if sys.platform == "darwin":
             argv += _MACOS_PACKAGED_ONLY_FLAGS
     if not headed:
-        argv.append("--headless=new")
+        argv += ["--headless=new", _HEADLESS_WINDOW_SIZE]
     configured = _configured_chromium_args()
+    if not headed and not any(str(a).startswith("--user-agent") for a in (*extra_args, *configured)):
+        user_agent = headless_user_agent(executable)
+        if user_agent:
+            argv.append(f"--user-agent={user_agent}")
     if sandbox_bypass and needs_chromium_sandbox_bypass():
         argv += [flag for flag in CHROMIUM_SANDBOX_BYPASS_ARGS if flag not in configured]
     argv += [str(a) for a in extra_args]

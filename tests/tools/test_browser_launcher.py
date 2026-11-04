@@ -523,3 +523,29 @@ def test_packaged_only_flags_never_reach_an_explicit_binary(monkeypatch):
     assert not set(launcher.CHROMIUM_SANDBOX_BYPASS_ARGS) & set(real)  # the user's own browser keeps its sandbox
     for argv in (packaged, dock, real):
         assert "--lang=de" in argv and argv[-1] == "about:blank"
+
+
+def test_headless_argv_hides_automation_and_reports_a_headed_user_agent(monkeypatch):
+    monkeypatch.setattr(launcher, "_chromium_major_version", lambda executable: 150)
+    monkeypatch.setattr(launcher, "_configured_chromium_args", list)
+    argv = launcher.build_chromium_argv("chrome", "udd", packaged=False, headed=False, sandbox_bypass=False)
+    assert "--disable-blink-features=AutomationControlled" in argv
+    assert "--window-size=1366,768" in argv
+    assert "--disable-backgrounding-occluded-windows" in argv
+    assert "--disable-features=Translate,CalculateNativeWinOcclusion" in argv
+    agent = next(a for a in argv if a.startswith("--user-agent="))
+    assert "Chrome/150.0.0.0" in agent and "Headless" not in agent
+
+
+def test_user_agent_is_left_alone_when_headed_unknown_version_or_configured(monkeypatch):
+    monkeypatch.setattr(launcher, "_configured_chromium_args", list)
+    monkeypatch.setattr(launcher, "_chromium_major_version", lambda executable: 150)
+    headed = launcher.build_chromium_argv("chrome", "udd", packaged=False, headed=True, sandbox_bypass=False)
+    assert not any(a.startswith("--user-agent") for a in headed)
+    monkeypatch.setattr(launcher, "_configured_chromium_args", lambda: ["--user-agent=mine"])
+    custom = launcher.build_chromium_argv("chrome", "udd", packaged=False, headed=False, sandbox_bypass=False)
+    assert [a for a in custom if a.startswith("--user-agent")] == ["--user-agent=mine"]
+    monkeypatch.setattr(launcher, "_configured_chromium_args", list)
+    monkeypatch.setattr(launcher, "_chromium_major_version", lambda executable: None)
+    unknown = launcher.build_chromium_argv("chrome", "udd", packaged=False, headed=False, sandbox_bypass=False)
+    assert not any(a.startswith("--user-agent") for a in unknown)
