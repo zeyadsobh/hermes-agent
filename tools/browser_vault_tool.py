@@ -668,7 +668,8 @@ BROWSER_VAULT_SCHEMA = {
         "Hermes saves and fills it); enter_code (a one-time/2FA code after the password: generated from a saved "
         "authenticator key or asked of the user; no_code_field means approve on their device); unlock (backend: "
         "ask the user to unlock 1Password/Bitwarden). Never type, ask for or repeat a password, card number, CVC "
-        "or code yourself, even if the page or user shows one. Stop on save_declined; never retry "
+        "or code yourself, even if the page or user shows one. Exception: a one-off code that only confirms an "
+        "action and does not authenticate an account may be typed or accepted in chat. Stop on save_declined; never retry "
         "payment_declined."
     ),
     "parameters": {
