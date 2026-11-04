@@ -254,6 +254,8 @@ export function ChatBar({
   // engine writes it — an explicit shared handle, not a back-reference.
   const queueEditRef = useRef<QueueEditState | null>(null)
   const composingRef = useRef(false) // true during IME composition (CJK input)
+  // Set by Cmd/Ctrl+Shift+V so the paste event that follows inserts the clipboard text verbatim.
+  const rawPasteRef = useRef(false)
   // The blur-close timer must not outlive the composer: an unmounted editor's
   // deferred closeTrigger() would setState after teardown (vitest reported it as
   // an unhandled "window is not defined" from paste-url-is-text.test.tsx).
@@ -566,6 +568,10 @@ export function ChatBar({
   }
 
   const handlePaste = (event: ClipboardEvent<HTMLDivElement>) => {
+    const rawPaste = rawPasteRef.current
+
+    rawPasteRef.current = false
+
     const imageBlobs = extractClipboardImageBlobs(event.clipboardData)
 
     if (imageBlobs.length > 0 && onAttachImageBlob) {
@@ -609,6 +615,16 @@ export function ChatBar({
     }
 
     event.preventDefault()
+
+    // Cmd/Ctrl+Shift+V pastes the text exactly as copied: no attachment for a
+    // large paste, no link or path chips, no selection-to-link conversion.
+    if (rawPaste) {
+      recordUndoPoint()
+      insertComposerContentsAtCaret(event.currentTarget, pastedText, openDirectiveScope(event.currentTarget))
+      scheduleFlushEditorToDraft(event.currentTarget)
+
+      return
+    }
 
     // Pasting exactly one link while composer text is selected turns that text
     // into a markdown link instead of replacing it — the behavior every rich
@@ -771,6 +787,15 @@ export function ChatBar({
       flushEditorToDraft(event.currentTarget)
 
       return
+    }
+
+    // Arms the raw paste for the paste event this chord triggers; the timeout
+    // disarms it when the chord produced no paste (e.g. an empty clipboard).
+    if ((event.metaKey || event.ctrlKey) && !event.altKey && event.shiftKey && event.key.toLowerCase() === 'v') {
+      rawPasteRef.current = true
+      window.setTimeout(() => {
+        rawPasteRef.current = false
+      }, 500)
     }
 
     // Cmd/Ctrl+Shift+K drains the next queued message. Plain Cmd/Ctrl+K is
